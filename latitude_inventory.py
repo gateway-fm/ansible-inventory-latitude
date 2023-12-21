@@ -43,6 +43,11 @@ DOCUMENTATION = r"""
             elements: string
             description: >
                 If specified, hosts tagged with specific tags will be excluded from the inventory.
+        server_status:
+            description: >
+                Latitude server status filter ('on'/'off')
+            type: string
+            required: False
 
 """
 
@@ -133,6 +138,19 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
     def get_servers(self) -> list[Server]:
         latitude_project = self.get_option("latitude_project")
         latitude_api_token = self.get_option("latitude_api_token")
+        server_status = self.get_option("server_status")
+        params = {
+            "filter[project]": latitude_project,
+            "sort": "id",
+        }
+        if server_status:
+            expected_server_statuses = ["on", "off"]
+            if server_status not in expected_server_statuses:
+                raise ValueError(
+                    f"Invalide {server_status=}, {expected_server_statuses=}"
+                )
+            params["filter[status]"] = server_status
+
         url = "https://api.latitude.sh/servers"
         headers = {
             "accept": "application/json",
@@ -146,11 +164,7 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
         page = 1
         all_servers = []
         while True:
-            params = {
-                "filter[project]": latitude_project,
-                "sort": "id",
-                "page[number]": page,
-            }
+            params["page[number]"] = page
             response = requests.get(url, headers=headers, params=params, timeout=10)
             response.raise_for_status()
 
