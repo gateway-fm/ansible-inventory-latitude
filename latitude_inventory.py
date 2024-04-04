@@ -178,6 +178,8 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
     def add_sever(self, server: Server) -> None:
         server_attributes = server["attributes"]
         hostname = server_attributes["hostname"]
+        # server_type on latitude, see https://docs.latitude.sh/reference/get-plans. Examples: "c2-small-x86", "c3-medium-arm"
+        server_type = server_attributes["plan"]["slug"]
         group = self.get_hosts_group(hostname)
 
         self.inventory.add_host(hostname, group=group)
@@ -185,6 +187,7 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
         host_vars = {}
         host_vars["public_ip_address"] = server_attributes["primary_ipv4"]
         host_vars["server_name"] = hostname
+        host_vars["server_type"] = server_type
         host_vars["group"] = group
         for var_name, var_value in host_vars.items():
             self.inventory.set_variable(hostname, var_name, var_value)
