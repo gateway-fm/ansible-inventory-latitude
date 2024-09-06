@@ -1,5 +1,5 @@
 from contextlib import suppress
-from typing import TypedDict
+from typing import Optional, TypedDict
 
 import requests
 from ansible.inventory.data import InventoryData
@@ -48,7 +48,6 @@ DOCUMENTATION = r"""
                 Latitude server status filter ('on'/'off')
             type: string
             required: False
-
 """
 
 
@@ -86,8 +85,16 @@ class Region(TypedDict):
     site: dict
 
 
+class Tag(TypedDict):
+    id: str
+    name: str
+    description: Optional[str]
+    color: str
+
+
 class ServerAttributes(TypedDict):
     created_at: str
+    tags: list[Tag]
     hostname: str
     ipmi_status: str
     label: str
@@ -130,10 +137,16 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
         # this method will parse 'common format' inventory sources and
         # update any options declared in DOCUMENTATION as needed
         self._read_config_data(path)
+
+        tags = self.get_tags()
+        for tag in tags:
+            if tag.startswith("role_"):
+                inventory.add_group(tag[len("role_"):])
+
         servers = self.get_servers()
 
         for server in servers:
-            self.add_sever(Server(server))
+            self.add_sever(inventory,Server(server))
 
     def get_servers(self) -> list[Server]:
         latitude_project = self.get_option("latitude_project")
@@ -174,21 +187,59 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
             all_servers += servers
             page += 1
         return all_servers
+    
+    def get_tags(self) -> list[str]:
+        latitude_api_token = self.get_option("latitude_api_token")
+        params = {
+            "sort": "id",
+        }
 
-    def add_sever(self, server: Server) -> None:
+        url = "https://api.latitude.sh/tags"
+        headers = {
+            "accept": "application/json",
+            "Authorization": latitude_api_token,
+        }
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        tags = response.json().get("data", [])
+        all_tag_names = [t["attributes"]["name"] for t in tags]
+        return all_tag_names
+        
+
+    def add_sever(self, inventory: InventoryData, server: Server) -> None:
         server_attributes = server["attributes"]
         hostname = server_attributes["hostname"]
         # server_type on latitude, see https://docs.latitude.sh/reference/get-plans. Examples: "c2-small-x86", "c3-medium-arm"
         server_type = server_attributes["plan"]["slug"]
-        group = self.get_hosts_group(hostname)
+        tags = [t["name"] for t in server_attributes["tags"]]
+        role_tags = [t for t in tags if t.startswith("role_")]
+        if role_tags:
+            groups = [t[len("role_"):] for t in role_tags]
+        else:   
+            groups = [self.get_hosts_group(hostname)]
 
-        self.inventory.add_host(hostname, group=group)
+        include_tags = self.get_option("include_tags")
+        exclude_tags = self.get_option("exclude_tags")
+
+        if include_tags is not None:
+            if not any(tag in include_tags for tag in tags):
+                return
+
+        if exclude_tags is not None:
+            if any(tag in exclude_tags for tag in tags):
+                return
+
+        for group in groups:
+            if group:
+                self.inventory.add_host(hostname, group=group)
+            else:
+                self.inventory.add_host(hostname)
 
         host_vars = {}
         host_vars["public_ip_address"] = server_attributes["primary_ipv4"]
         host_vars["server_name"] = hostname
         host_vars["server_type"] = server_type
-        host_vars["group"] = group
+        host_vars["tags"] = tags
         for var_name, var_value in host_vars.items():
             self.inventory.set_variable(hostname, var_name, var_value)
 
