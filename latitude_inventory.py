@@ -239,7 +239,7 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
         host_vars["public_ip_address"] = server_attributes["primary_ipv4"]
         host_vars["server_name"] = hostname
         host_vars["server_type"] = server_type
-        host_vars["tags"] = [t["name"] for t in server_attributes["tags"]]
+        host_vars["tags"] = tags
         for var_name, var_value in host_vars.items():
             self.inventory.set_variable(hostname, var_name, var_value)
 
