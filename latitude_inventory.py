@@ -1,4 +1,3 @@
-from contextlib import suppress
 from typing import Optional, TypedDict
 
 import requests
@@ -213,10 +212,7 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
         server_type = server_attributes["plan"]["slug"]
         tags = [t["name"] for t in server_attributes["tags"]]
         role_tags = [t for t in tags if t.startswith("role_")]
-        if role_tags:
-            groups = [t[len("role_"):] for t in role_tags]
-        else:   
-            groups = [self.get_hosts_group(hostname)]
+        groups = [t[len("role_"):] for t in role_tags]
 
         include_tags = self.get_option("include_tags")
         exclude_tags = self.get_option("exclude_tags")
@@ -229,17 +225,24 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
             if any(tag in exclude_tags for tag in tags):
                 return
 
-        for group in groups:
-            if group:
-                self.inventory.add_host(hostname, group=group)
-            else:
-                self.inventory.add_host(hostname)
+        if groups:
+            for group in groups:
+                if group:
+                    self.inventory.add_host(hostname, group=group)
+                else:
+                    self.inventory.add_host(hostname)
+        else:
+            # Add host without assigning a role-based group
+            self.inventory.add_host(hostname)
 
         host_vars = {}
         host_vars["public_ip_address"] = server_attributes["primary_ipv4"]
         host_vars["server_name"] = hostname
         host_vars["server_type"] = server_type
         host_vars["tags"] = tags
+        if groups:
+            # host role is defined strictly via role_* tags
+            host_vars["role"] = groups[0]
         for var_name, var_value in host_vars.items():
             self.inventory.set_variable(hostname, var_name, var_value)
 
@@ -260,15 +263,3 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
             self.get_option("keyed_groups"), host_vars, hostname, strict=strict
         )
 
-    def get_hosts_group(self, hostname: str) -> str | None:
-        group = None
-        with suppress(IndexError):
-            group = hostname.split("-")[1]
-            self.inventory.add_group(group)
-        include_tags = self.get_option("include_tags")
-        if include_tags and include_tags != group:
-            return None
-        exclude_tags = self.get_option("exclude_tags")
-        if exclude_tags and exclude_tags == group:
-            return None
-        return group
